@@ -26,12 +26,13 @@ const addressSchema = new mongoose.Schema(
 const bookingSchema = new mongoose.Schema(
   {
     customer: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    serviceType: {
-      type: String,
-      required: true,
-      enum: ["wall_design", "pop", "putty", "ceiling", "other"],
-      index: true,
-    },
+    serviceID: { type: mongoose.Schema.Types.ObjectId, ref: "Service", required: true, index: true },
+    // serviceType: {
+    //   type: String,
+    //   required: true,
+    //   enum: ["wall_design", "pop", "putty", "ceiling", "other"],
+    //   index: true,
+    // },
     address: { type: addressSchema, required: true },
     scheduledAt: { type: Date, required: true, index: true },
     description: { type: String, trim: true, maxlength: 2000 },

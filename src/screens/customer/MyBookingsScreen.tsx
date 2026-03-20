@@ -1,14 +1,14 @@
 import React from "react";
 import { FlatList, RefreshControl, SafeAreaView, Text, View } from "react-native";
-
-import { useMyBookings } from "../../hooks/useBookings";
 import { Card } from "../../components/ui/Card";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { Header } from "../../components/ui/Header";
 import { Skeleton } from "../../components/ui/Skeleton";
-import { EmptyState } from "../../components/ui/EmptyState";
+import { useMyBookings } from "../../hooks/useBookings";
 
 export function MyBookingsScreen() {
   const q = useMyBookings();
+    // console.log("bookings---------->",chalk.green(JSON.stringify(q.data, null, 2)));
 
   return (
     <SafeAreaView className="flex-1 bg-ink-950">
@@ -33,7 +33,11 @@ export function MyBookingsScreen() {
           renderItem={({ item }) => (
             <Card className="p-4">
               <View className="flex-row items-center justify-between">
-                <Text className="text-white font-semibold">{item.serviceType.replace("_", " ").toUpperCase()}</Text>
+                <Text className="text-white font-semibold">
+                  {item.serviceType 
+                    ? item.serviceType.replace("_", " ").toUpperCase() 
+                    : "REQUESTED SERVICE"}
+                </Text>
                 <Text className="text-sky-300 font-semibold">{item.status}</Text>
               </View>
               <Text className="text-white/70 mt-2">

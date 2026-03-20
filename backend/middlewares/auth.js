@@ -29,3 +29,11 @@ export const requireAuth = asyncHandler(async (req, _res, next) => {
   next();
 });
 
+export const requireRole = (role) => {
+  return (req, _res, next) => {
+    if (!req.user || req.user.role !== role) {
+      throw new AppError("Forbidden: Insufficient permissions", { statusCode: 403 });
+    }
+    next();
+  };
+};

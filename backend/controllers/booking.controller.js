@@ -5,7 +5,8 @@ import { AppError } from "../utils/errors.js";
 import { emitBookingUpdate } from "../utils/realtime.js";
 
 const createBookingSchema = z.object({
-  serviceType: z.enum(["wall_design", "pop", "putty", "ceiling", "other"]),
+  // serviceType: z.enum(["wall_design", "pop", "putty", "ceiling", "other"]),
+  serviceID: z.string().trim().max(50),
   address: z.object({
     label: z.string().trim().max(50).optional(),
     line1: z.string().trim().min(3).max(200),
@@ -27,6 +28,7 @@ const createBookingSchema = z.object({
 
 export const createBooking = asyncHandler(async (req, res) => {
   const body = createBookingSchema.parse(req.body);
+  // console.log("body909999---->", body)
 
   const booking = await Booking.create({
     customer: req.user.id,

@@ -1,22 +1,29 @@
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 
+import { Attendance } from "../models/Attendance.js";
+import { Booking, BOOKING_STATUS } from "../models/Booking.js";
+import { User, USER_ROLES, } from "../models/User.js";
+import { WorkerPaymentRecord } from "../models/WorkerPaymentRecord.js";
+import { Workers } from "../models/Workers.js";
+import { TASK_STATUS, WorkerTask } from "../models/WorkerTask.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../utils/errors.js";
-import { User, USER_ROLES } from "../models/User.js";
-import { Booking, BOOKING_STATUS } from "../models/Booking.js";
-import { WorkerTask, TASK_STATUS } from "../models/WorkerTask.js";
 import { emitBookingUpdate } from "../utils/realtime.js";
 
 export const dashboard = asyncHandler(async (_req, res) => {
-  const [bookingsTotal, workersTotal, bookingsByStatus] = await Promise.all([
+  const [bookingsTotal, userTotal, workersTotal, bookingsByStatus] = await Promise.all([
     Booking.countDocuments({}),
     User.countDocuments({ role: USER_ROLES.WORKER }),
+    Workers.countDocuments({}),
+
+
     Booking.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
   ]);
 
   res.json({
     bookingsTotal,
+    userTotal,
     workersTotal,
     bookingsByStatus,
   });
@@ -28,8 +35,12 @@ export const listWorkers = asyncHandler(async (req, res) => {
   const skip = (page - 1) * limit;
 
   const [items, total] = await Promise.all([
-    User.find({ role: USER_ROLES.WORKER }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-    User.countDocuments({ role: USER_ROLES.WORKER }),
+    Workers.find({})
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Workers.countDocuments({}),
   ]);
 
   res.json({ items, page, limit, total });
@@ -119,6 +130,7 @@ export const listBookings = asyncHandler(async (req, res) => {
     Booking.find(q)
       .populate("customer", "name phone")
       .populate("assignedWorker", "name phone")
+      .populate("serviceID", "name")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
@@ -173,4 +185,108 @@ export const assignBookingToWorker = asyncHandler(async (req, res) => {
   emitBookingUpdate(req.app, booking.toObject());
   res.json({ booking, task });
 });
+
+export const markAttendance = asyncHandler(async (req, res) => {
+  const body = z
+    .object({
+      workerId: z.string().min(1),
+      date: z.string().min(1),
+      status: z.enum(["present", "leave"]),
+      note: z.string().optional(),
+    })
+    .parse(req.body);
+
+  const attendanceDate = new Date(body.date);
+  attendanceDate.setHours(0, 0, 0, 0);
+
+  const attendance = await Attendance.findOneAndUpdate(
+    { worker: body.workerId, date: attendanceDate },
+    {
+      worker: body.workerId,
+      date: attendanceDate,
+      status: body.status,
+      note: body.note,
+      markedBy: req.user.id,
+    },
+    { upsert: true, new: true }
+  );
+
+  res.json(attendance);
+});
+
+export const getWorkerStats = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  // Try to find in Workers collection first (user's preferred model now)
+  let worker = await Workers.findById(id).lean();
+  let dailyWage = 0;
+  let name = "";
+
+  if (worker) {
+    dailyWage = worker.price || 0;
+    name = worker.name || `${worker.firstName} ${worker.lastName}`;
+  } else {
+    // Fallback to User collection
+    const u = await User.findOne({ _id: id, role: USER_ROLES.WORKER }).lean();
+    if (!u) throw new AppError("Worker not found", { statusCode: 404 });
+    worker = u;
+    dailyWage = u.workerProfile?.dailyWage || 0;
+    name = u.name;
+  }
+
+  const now = new Date();
+  const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  const [tasksCount, attendanceHistory, payments] = await Promise.all([
+    WorkerTask.countDocuments({ worker: id, status: TASK_STATUS.COMPLETED }),
+    Attendance.find({ worker: id, date: { $gte: startOfLastMonth } }).sort({ date: -1 }).lean(),
+    WorkerPaymentRecord.find({ worker: id }).sort({ paymentDate: -1 }).lean(),
+  ]);
+
+  const attendanceDays = attendanceHistory.filter(a => a.status === "present").length;
+  const totalPaid = payments.reduce((acc, p) => acc + p.amount, 0);
+  const totalEarned = attendanceDays * dailyWage;
+  const balance = totalEarned - totalPaid;
+
+  res.json({
+    worker: { ...worker, name, dailyWage },
+    stats: {
+      tasksCount,
+      attendanceDays,
+      totalEarned,
+      totalPaid,
+      balance: balance >= 0 ? balance : 0,
+      advance: balance < 0 ? Math.abs(balance) : 0,
+    },
+    attendanceHistory,
+    payments,
+  });
+});
+
+
+export const recordWorkerPayment = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const body = z
+    .object({
+      amount: z.number().positive(),
+      notes: z.string().optional(),
+      method: z.enum(["cash", "online", "bank_transfer"]).optional(),
+    })
+    .parse(req.body);
+
+  const worker = await User.findOne({ _id: id, role: USER_ROLES.WORKER });
+  if (!worker) throw new AppError("Worker not found", { statusCode: 404 });
+
+  const payment = await WorkerPaymentRecord.create({
+    worker: id,
+    amount: body.amount,
+    notes: body.notes,
+    method: body.method || "cash",
+    admin: req.user.id,
+  });
+
+  res.status(201).json(payment);
+});
+
 
